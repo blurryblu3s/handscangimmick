@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Biometric Access Module</title>
+    <style>
+        /* --- RESET & BASIC SETUP --- */
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            padding: 0;
+            /* Deep blue radial background to match reference */
+            background: radial-gradient(circle at center, #001a33 0%, #000 100%);
+            color: #0ff;
+            font-family: "Courier New", Courier, monospace;
+            overflow: hidden;
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+            height: 100vh;
+            width: 100vw;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* --- UTILITIES --- */
+        .hidden { display: none !important; }
+        
+        /* --- BACKGROUND FX --- */
+        .bg-grid {
+            background-image: 
+                linear-gradient(rgba(0, 255, 255, 0.05) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 255, 255, 0.05) 1px, transparent 1px);
+            background-size: 50px 50px;
+            width: 100%; height: 100%;
+            position: absolute; top: 0; left: 0;
+            z-index: 0; pointer-events: none;
+        }
+
+        /* --- START OVERLAY --- */
+        #start-overlay {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #000; z-index: 100;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer;
+        }
+        .start-box {
+            border: 1px solid #06b6d4; padding: 2rem;
+            background-color: rgba(6, 182, 212, 0.1);
+            box-shadow: 0 0 30px rgba(0, 255, 255, 0.3);
+            animation: pulse-border 2s infinite;
+        }
+        .start-title { font-size: 1.5rem; color: #22d3ee; margin-bottom: 0.5rem; letter-spacing: 0.1em; font-weight: bold; text-align: center; }
+
+        /* --- MAIN INTERFACE --- */
+        .hud-header {
+            width: 100%; display: flex; justify-content: space-between;
+            padding: 20px; position: absolute; top: 0; left: 0;
+            font-size: 10px; letter-spacing: 0.1em; color: rgba(6, 182, 212, 0.7);
+            z-index: 10;
+        }
+
+        .scanner-interface {
+            position: relative; z-index: 10;
+            display: flex; flex-direction: column; align-items: center;
+            width: 100%; max-width: 400px;
+            transition: opacity 0.5s;
+        }
+
+        /* --- THE PLEXUS HAND --- */
+        .hand-container {
+            position: relative; width: 300px; height: 400px; margin: 0 auto;
+        }
+
+        .hand-svg {
+            width: 100%; height: 100%;
+            opacity: 0.4; transition: all 0.5s ease-out;
+            filter: drop-shadow(0 0 5px rgba(0,255,255,0.3));
+        }
+
+        /* Active State when touched */
+        .hand-svg.active { 
+            opacity: 1; 
+            filter: drop-shadow(0 0 15px rgba(0,255,255,0.8)); 
+        }
+        
+        /* Success State */
+        .hand-svg.success { 
+            filter: drop-shadow(0 0 20px #0f0); 
+        }
+        .hand-svg.success .plexus-line { stroke: #0f0; }
+        .hand-svg.success .plexus-poly { fill: rgba(0,255,0,0.1); }
+        .hand-svg.success .plexus-node { fill: #0f0; }
+        .hand-svg.success .target-ring { stroke: #0f0; }
+        .hand-svg.success .glow-dot { fill: #0f0; }
+
+        /* Target Animations */
+        .spin { animation: spin-anim 4s linear infinite; transform-origin: center; transform-box: fill-box; }
+        .spin-rev { animation: spin-rev-anim 5s linear infinite; transform-origin: center; transform-box: fill-box; }
+
+        @keyframes spin-anim { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        @keyframes spin-rev-anim { from { transform: rotate(0deg); } to { transform: rotate(-360deg); } }
+
+        /* Scanning Beam */
+        .scan-beam {
+            position: absolute; top: 0; left: -10%;
+            width: 120%; height: 2px;
+            background: #fff;
+            box-shadow: 0 0 25px 8px #0ff;
+            opacity: 0; z-index: 20; pointer-events: none;
+        }
+        .scanning .scan-beam {
+            opacity: 1;
+            animation: scanMove 2.5s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+        }
+
+        /* General Animations */
+        @keyframes scanMove {
+            0% { top: 0%; opacity: 0; }
+            10% { opacity: 1; }
+            90% { opacity: 1; }
+            100% { top: 100%; opacity: 0; }
+        }
+        @keyframes pulse-anim {
+            0% { transform: scale(1); opacity: 0.4; }
+            50% { transform: scale(1.02); opacity: 0.6; }
+            100% { transform: scale(1); opacity: 0.4; }
+        }
+        @keyframes pulse-border {
+            0% { box-shadow: 0 0 10px rgba(0, 255, 255, 0.1); }
+            50% { box-shadow: 0 0 30px rgba(0, 255, 255, 0.3); }
+            100% { box-shadow: 0 0 10px rgba(0, 255, 255, 0.1); }
+        }
+
+        .pulse-anim { animation: pulse-anim 3s infinite ease-in-out; }
+
+        /* Data Text */
+        #scan-data {
+            position: absolute; top: 60px; right: -50px;
+            font-size: 10px; color: #0ff; opacity: 0;
+            text-align: left; line-height: 1.5; text-shadow: 0 0 5px #0ff;
+        }
+
+        /* Text & Progress */
+        .status-area { margin-top: 1rem; text-align: center; min-height: 100px; }
+        #status-text { font-size: 1.5rem; font-weight: bold; letter-spacing: 0.2em; color: #22d3ee; margin: 0; transition: color 0.3s; text-shadow: 0 0 10px rgba(0,255,255,0.5); }
+        #sub-status { font-size: 0.75rem; color: #0891b2; margin-top: 0.5rem; letter-spacing: 0.05em; }
+        
+        .progress-bar-bg {
+            width: 250px; height: 6px; background: rgba(0,255,255,0.1);
+            margin: 15px auto; border-radius: 4px; overflow: hidden;
+            display: none; border: 1px solid rgba(0,255,255,0.3);
+        }
+        .progress-bar-fill { height: 100%; background: #0ff; width: 0%; box-shadow: 0 0 15px #0ff; }
+
+        /* Corners */
+        .corner-bracket {
+            position: absolute; width: 30px; height: 30px;
+            border: 2px solid #0ff; opacity: 0.5; pointer-events: none;
+        }
+        .tl { top: -10px; left: -10px; border-right: none; border-bottom: none; }
+        .tr { top: -10px; right: -10px; border-left: none; border-bottom: none; }
+        .bl { bottom: -10px; left: -10px; border-right: none; border-top: none; }
+        .br { bottom: -10px; right: -10px; border-left: none; border-top: none; }
+
+        /* --- VIDEO LAYER --- */
+        #video-layer {
+            position: fixed; top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            background: #000; z-index: 200;
+            display: none; opacity: 0; transition: opacity 1s;
+            align-items: center; justify-content: center;
+        }
+        #video-layer.visible { opacity: 1; }
+        video { width: 100%; height: 100%; object-fit: cover; }
+        
+        .reset-btn {
+            position: absolute; bottom: 20px; right: 20px;
+            opacity: 0.1; background: transparent; border: 1px solid #fff;
+            color: #fff; padding: 5px; font-size: 8px; cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- CLICK TO START (Required for iOS Audio) -->
+    <div id="start-overlay">
+        <div class="start-box">
+            <div class="start-title">SYSTEM LOCKED</div>
+            <div style="font-size: 0.8rem; color: #a5f3fc; text-align: center;">TAP TO INITIALIZE</div>
+        </div>
+    </div>
+
+    <div class="bg-grid"></div>
+
+    <div class="hud-header">
+        <div>SEC.LEVEL: 5 [ULTRA]</div>
+        <div id="clock">00:00:00</div>
+    </div>
+
+    <div id="scanner-interface" class="scanner-interface">
+        
+        <!-- Corners -->
+        <div class="corner-bracket tl"></div>
+        <div class="corner-bracket tr"></div>
+        <div class="corner-bracket bl"></div>
+        <div class="corner-bracket br"></div>
+
+        <!-- The Hand Trigger Area -->
+        <div class="hand-container" id="hand-trigger">
+            <div class="scan-beam"></div>
+            
+            <!-- PLEXUS HAND SVG -->
+            <svg class="hand-svg pulse-anim" id="hand-icon" viewBox="0 0 300 400" xmlns="http://www.w3.org/2000/svg">
+                <defs>
+                    <filter id="neon-glow" x="-50%" y="-50%" width="200%" height="200%">
+                        <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+                        <feMerge>
+                            <feMergeNode in="coloredBlur"/>
+                            <feMergeNode in="SourceGraphic"/>
+                        </feMerge>
+                    </filter>
+                </defs>
+
+                <!-- Soft Outer Silhouette -->
+                <path d="M 120 380 Q 90 280 60 250 Q 30 220 50 210 Q 70 200 90 180 L 95 90 Q 100 60 115 80 L 130 120 L 140 60 Q 150 30 160 60 L 175 120 L 205 80 Q 220 60 225 90 L 220 150 L 255 140 Q 280 130 270 155 Q 250 210 240 240 Q 230 300 180 380 Z" 
+                      stroke="rgba(0, 255, 255, 0.2)" stroke-width="2" fill="none" stroke-linejoin="round"/>
+
+                <!-- Polygon Fills for Depth -->
+                <polygon class="plexus-poly" points="150,250 100,180 150,160" fill="rgba(0,255,255,0.06)"/>
+                <polygon class="plexus-poly" points="150,250 200,180 150,160" fill="rgba(0,255,255,0.06)"/>
+                <polygon class="plexus-poly" points="150,250 90,240 100,180" fill="rgba(0,255,255,0.04)"/>
+                <polygon class="plexus-poly" points="150,250 220,220 200,180" fill="rgba(0,255,255,0.04)"/>
+                <polygon class="plexus-poly" points="100,180 150,160 120,120" fill="rgba(0,255,255,0.08)"/>
+                <polygon class="plexus-poly" points="150,160 200,180 180,120" fill="rgba(0,255,255,0.08)"/>
+
+                <!-- Network Web Lines -->
+                <g class="plexus-line" stroke="rgba(0, 255, 255, 0.5)" stroke-width="1" fill="none">
+                    <!-- Palm to Joints -->
+                    <line x1="150" y1="250" x2="100" y2="180"/>
+                    <line x1="150" y1="250" x2="150" y2="160"/>
+                    <line x1="150" y1="250" x2="200" y2="180"/>
+                    <line x1="150" y1="250" x2="90"  y2="240"/>
+                    <line x1="150" y1="250" x2="220" y2="220"/>
+                    <line x1="150" y1="250" x2="150" y2="340"/>
+                    <line x1="150" y1="250" x2="110" y2="320"/>
+                    <line x1="150" y1="250" x2="190" y2="320"/>
+
+                    <!-- Joints to Tips -->
+                    <line x1="100" y1="180" x2="100" y2="80"/>
+                    <line x1="150" y1="160" x2="150" y2="50"/>
+                    <line x1="200" y1="180" x2="210" y2="70"/>
+                    <line x1="90"  y1="240" x2="50"  y2="220"/>
+                    <line x1="220" y1="220" x2="260" y2="140"/>
+
+                    <!-- Cross Bracing -->
+                    <line x1="100" y1="180" x2="150" y2="160"/>
+                    <line x1="150" y1="160" x2="200" y2="180"/>
+                    <line x1="90"  y1="240" x2="100" y2="180"/>
+                    <line x1="220" y1="220" x2="200" y2="180"/>
+
+                    <line x1="100" y1="180" x2="120" y2="120"/>
+                    <line x1="120" y1="120" x2="100" y2="80"/>
+                    <line x1="120" y1="120" x2="150" y2="50"/>
+                    
+                    <line x1="150" y1="160" x2="180" y2="120"/>
+                    <line x1="180" y1="120" x2="150" y2="50"/>
+                    <line x1="180" y1="120" x2="210" y2="70"/>
+                    <line x1="180" y1="120" x2="200" y2="180"/>
+                </g>
+
+                <!-- Intersection Nodes -->
+                <g class="plexus-node" fill="#0ff" filter="url(#neon-glow)">
+                    <!-- Joints -->
+                    <circle cx="100" cy="180" r="3"/>
+                    <circle cx="150" cy="160" r="3"/>
+                    <circle cx="200" cy="180" r="3"/>
+                    <circle cx="90"  cy="240" r="3"/>
+                    <circle cx="220" cy="220" r="3"/>
+                    
+                    <!-- Mid Fingers -->
+                    <circle cx="120" cy="120" r="2.5"/>
+                    <circle cx="180" cy="120" r="2.5"/>
+                    
+                    <!-- Wrist -->
+                    <circle cx="150" cy="340" r="3"/>
+                    <circle cx="110" cy="320" r="3"/>
+                    <circle cx="190" cy="320" r="3"/>
+                </g>
+
+                <!-- Palm Core Target -->
+                <g transform="translate(150, 250)">
+                    <circle class="target-ring spin" cx="0" cy="0" r="15" stroke="rgba(0,255,255,0.5)" stroke-width="1" fill="none" stroke-dasharray="10,5"/>
+                    <circle class="target-ring spin-rev" cx="0" cy="0" r="25" stroke="rgba(0,255,255,0.3)" stroke-width="0.5" fill="none" stroke-dasharray="2,4"/>
+                    <circle class="glow-dot" cx="0" cy="0" r="5" fill="#0ff" filter="url(#neon-glow)"/>
+                </g>
+
+                <!-- FINGERTIP TARGETS -->
+                <g stroke="#0ff">
+                    <!-- Thumb -->
+                    <g transform="translate(50, 220)">
+                        <circle class="target-ring" cx="0" cy="0" r="10" stroke-width="1" fill="none" opacity="0.4"/>
+                        <circle class="target-ring spin" cx="0" cy="0" r="16" stroke-width="1" stroke-dasharray="4,4" fill="none"/>
+                        <circle class="glow-dot" cx="0" cy="0" r="4" fill="#0ff" stroke="none" filter="url(#neon-glow)"/>
+                    </g>
+                    <!-- Index -->
+                    <g transform="translate(100, 80)">
+                        <circle class="target-ring" cx="0" cy="0" r="12" stroke-width="1" fill="none" opacity="0.4"/>
+                        <circle class="target-ring spin-rev" cx="0" cy="0" r="18" stroke-width="1" stroke-dasharray="2,6" fill="none"/>
+                        <circle class="glow-dot" cx="0" cy="0" r="4" fill="#0ff" stroke="none" filter="url(#neon-glow)"/>
+                    </g>
+                    <!-- Middle -->
+                    <g transform="translate(150, 50)">
+                        <circle class="target-ring" cx="0" cy="0" r="14" stroke-width="1.5" fill="none" opacity="0.5"/>
+                        <circle class="target-ring spin" cx="0" cy="0" r="22" stroke-width="1" stroke-dasharray="5,5" fill="none"/>
+                        <circle class="glow-dot" cx="0" cy="0" r="5" fill="#0ff" stroke="none" filter="url(#neon-glow)"/>
+                    </g>
+                    <!-- Ring -->
+                    <g transform="translate(210, 70)">
+                        <circle class="target-ring" cx="0" cy="0" r="12" stroke-width="1" fill="none" opacity="0.4"/>
+                        <circle class="target-ring spin-rev" cx="0" cy="0" r="18" stroke-width="1" stroke-dasharray="3,4" fill="none"/>
+                        <circle class="glow-dot" cx="0" cy="0" r="4" fill="#0ff" stroke="none" filter="url(#neon-glow)"/>
+                    </g>
+                    <!-- Pinky -->
+                    <g transform="translate(260, 140)">
+                        <circle class="target-ring" cx="0" cy="0" r="10" stroke-width="1" fill="none" opacity="0.4"/>
+                        <circle class="target-ring spin" cx="0" cy="0" r="16" stroke-width="1" stroke-dasharray="2,2" fill="none"/>
+                        <circle class="glow-dot" cx="0" cy="0" r="3" fill="#0ff" stroke="none" filter="url(#neon-glow)"/>
+                    </g>
+                </g>
+            </svg>
+
+            <!-- Floating Data -->
+            <div id="scan-data">
+                <div>BIOMETRIC MESH</div>
+                <div style="margin-top:5px; color:#0891b2;">NODE_VERIFY...</div>
+                <div id="random-hash" style="margin-top:5px; font-size:8px;">0xA4...</div>
+            </div>
+        </div>
+
+        <div class="status-area">
+            <h2 id="status-text">TOUCH TO SCAN</h2>
+            <p id="sub-status">SYSTEM READY</p>
+            
+            <div class="progress-bar-bg" id="progress-bar-bg">
+                <div class="progress-bar-fill" id="progress-bar"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- VIDEO LAYER -->
+    <div id="video-layer">
+        <!-- OFFLINE: Put 'reveal.mp4' in the same folder -->
+        <video id="launch-video" playsinline>
+            <source src="reveal.mp4" type="video/mp4">
+        </video>
+        <button class="reset-btn" onclick="location.reload()">RESET SYSTEM</button>
+    </div>
+
+    <script>
+        // --- CONFIGURATION ---
+        const SCAN_DURATION_MS = 3000;
+        
+        // --- STATE ---
+        let state = {
+            scanning: false,
+            complete: false,
+            audioCtx: null,
+            animFrame: null
+        };
+
+        // --- ELEMENTS ---
+        const els = {
+            startOverlay: document.getElementById('start-overlay'),
+            interface: document.getElementById('scanner-interface'),
+            handTrigger: document.getElementById('hand-trigger'),
+            handSvg: document.getElementById('hand-icon'),
+            status: document.getElementById('status-text'),
+            subStatus: document.getElementById('sub-status'),
+            progressBg: document.getElementById('progress-bar-bg'),
+            progressFill: document.getElementById('progress-bar'),
+            scanData: document.getElementById('scan-data'),
+            videoLayer: document.getElementById('video-layer'),
+            video: document.getElementById('launch-video'),
+            hash: document.getElementById('random-hash'),
+            clock: document.getElementById('clock')
+        };
+
+        // --- UTILS ---
+        setInterval(() => {
+            els.clock.innerText = new Date().toLocaleTimeString('en-US', {hour12:false});
+        }, 1000);
+
+        // --- AUDIO ENGINE ---
+        const playSound = (type) => {
+            if(!state.audioCtx) return;
+            const ctx = state.audioCtx;
+            const t = ctx.currentTime;
+
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+
+            if (type === 'beep') {
+                osc.frequency.setValueAtTime(1000, t);
+                osc.frequency.exponentialRampToValueAtTime(0.01, t + 0.1);
+                gain.gain.setValueAtTime(0.1, t);
+                osc.start(t); osc.stop(t + 0.1);
+            } 
+            else if (type === 'scan') {
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(100, t);
+                osc.frequency.linearRampToValueAtTime(800, t + (SCAN_DURATION_MS/1000));
+                
+                // Jitter for hi-tech effect
+                const lfo = ctx.createOscillator();
+                lfo.frequency.value = 15;
+                const lfoGain = ctx.createGain();
+                lfoGain.gain.value = 50;
+                lfo.connect(lfoGain);
+                lfoGain.connect(osc.frequency);
+                lfo.start(t);
+
+                gain.gain.setValueAtTime(0, t);
+                gain.gain.linearRampToValueAtTime(0.1, t + 0.5);
+                
+                osc.start(t); osc.stop(t + (SCAN_DURATION_MS/1000));
+            }
+            else if (type === 'success') {
+                [523.25, 659.25, 783.99, 1046.50].forEach((f, i) => {
+                    const o = ctx.createOscillator();
+                    const g = ctx.createGain();
+                    o.connect(g); g.connect(ctx.destination);
+                    o.type = 'square';
+                    o.frequency.value = f;
+                    g.gain.setValueAtTime(0, t);
+                    g.gain.linearRampToValueAtTime(0.05, t + 0.1 + (i*0.05));
+                    g.gain.exponentialRampToValueAtTime(0.001, t + 2);
+                    o.start(t); o.stop(t + 2);
+                });
+            }
+        };
+
+        // --- LOGIC ---
+        function initAudio() {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            state.audioCtx = new AudioContext();
+            state.audioCtx.resume();
+            playSound('beep');
+            els.startOverlay.style.display = 'none';
+            if (document.documentElement.requestFullscreen) {
+                document.documentElement.requestFullscreen().catch(()=>{});
+            }
+        }
+
+        els.startOverlay.addEventListener('click', initAudio);
+        els.startOverlay.addEventListener('touchstart', (e) => {
+            e.preventDefault(); initAudio();
+        });
+
+        // ONE-TAP TRIGGER
+        function triggerScan() {
+            if (state.scanning || state.complete) return;
+            
+            state.scanning = true;
+            
+            // Visuals Update
+            els.handTrigger.classList.add('scanning');
+            els.handSvg.classList.remove('pulse-anim'); // Stop breathing pulse
+            els.handSvg.classList.add('active'); // Activate bright mode
+            
+            els.progressBg.style.display = 'block';
+            els.scanData.style.opacity = '1';
+            els.status.innerText = "ANALYZING NODES...";
+            els.subStatus.innerText = "PLEASE WAIT";
+            
+            playSound('scan');
+
+            let start = performance.now();
+
+            const loop = (now) => {
+                const elapsed = now - start;
+                const pct = Math.min((elapsed / SCAN_DURATION_MS) * 100, 100);
+
+                els.progressFill.style.width = `${pct}%`;
+                
+                // Tech effect: Random Hex Generator
+                if (Math.random() > 0.8) {
+                    els.hash.innerText = "0x" + Math.floor(Math.random()*999999).toString(16).toUpperCase();
+                }
+
+                if (pct < 100) {
+                    state.animFrame = requestAnimationFrame(loop);
+                } else {
+                    finishScan();
+                }
+            };
+            state.animFrame = requestAnimationFrame(loop);
+        }
+
+        function finishScan() {
+            state.complete = true;
+            playSound('success');
+
+            // Success Visuals
+            els.handTrigger.classList.remove('scanning');
+            els.handSvg.classList.remove('active');
+            els.handSvg.classList.add('success');
+            
+            els.progressFill.style.background = '#0f0';
+            els.progressFill.style.boxShadow = '0 0 15px #0f0';
+            els.status.innerText = "ACCESS GRANTED";
+            els.status.style.color = "#0f0";
+            els.status.style.textShadow = "0 0 15px #0f0";
+            els.subStatus.innerText = "BIOMETRIC MATCH CONFIRMED";
+            
+            // Transition to Video
+            setTimeout(() => {
+                els.interface.style.opacity = '0';
+                setTimeout(() => {
+                    els.interface.classList.add('hidden');
+                    els.videoLayer.style.display = 'flex';
+                    setTimeout(() => {
+                        els.videoLayer.classList.add('visible');
+                        els.video.play();
+                    }, 100);
+                }, 800);
+            }, 1000);
+        }
+
+        // --- EVENTS ---
+        els.handTrigger.addEventListener('mousedown', triggerScan);
+        els.handTrigger.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            triggerScan();
+        }, {passive: false});
+        
+        window.oncontextmenu = (e) => { e.preventDefault(); return false; };
+
+    </script>
+</body>
+</html>
